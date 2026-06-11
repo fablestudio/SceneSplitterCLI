@@ -82,7 +82,9 @@ python3 scene_split.py movie.mp4 --copy
 2. **Detect** — PySceneDetect's `ContentDetector` finds every scene change.
 3. **Plan** — starting from 0, each piece ends at the first scene boundary at
    or after `start + length`. If no boundary remains, the piece runs to the
-   end of the video (so the final piece may be shorter than the target).
+   end of the video. If that leftover final piece would be shorter than half
+   the target length, it is appended to the previous piece instead of
+   standing alone — no piece is ever shorter than half the target.
 4. **Split** — each piece is encoded with libx264 at the source bitrate,
    keeping the source resolution and frame rate; audio is stream-copied.
 

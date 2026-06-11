@@ -86,7 +86,8 @@ def plan_segments(boundaries, duration, target_len):
 
     Each segment ends at the first boundary at or after
     segment_start + target_len. If no boundary remains, the segment runs to
-    the end of the video.
+    the end of the video. A final segment shorter than half the target is
+    merged into the one before it rather than standing alone.
     """
     segments = []
     start = 0.0
@@ -97,6 +98,9 @@ def plan_segments(boundaries, duration, target_len):
         )
         segments.append((start, end))
         start = end
+    if len(segments) >= 2 and segments[-1][1] - segments[-1][0] < target_len / 2:
+        (start, _), (_, end) = segments[-2], segments[-1]
+        segments[-2:] = [(start, end)]
     return segments
 
 
