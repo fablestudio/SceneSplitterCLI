@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Video files and tool output
+*.mp4
+*.mkv
+*.mov
+*_pieces/
+
+# OS cruft
+.DS_Store
+Thumbs.db
