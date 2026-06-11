@@ -147,7 +147,9 @@ def main():
     )
     parser.add_argument(
         "-o", "--output-dir", type=Path, default=None,
-        help="output directory (default: <video name>_pieces next to input)",
+        help="output directory; existing files there are overwritten "
+        "(default: <video name>_pieces next to input, auto-incremented to "
+        "_pieces_2, _pieces_3, ... if it already exists)",
     )
     parser.add_argument(
         "-t", "--threshold", type=float, default=27.0,
@@ -167,7 +169,15 @@ def main():
     ffmpeg = find_tool("ffmpeg")
     ffprobe = find_tool("ffprobe")
 
-    out_dir = args.output_dir or args.video.parent / f"{args.video.stem}_pieces"
+    if args.output_dir:
+        out_dir = args.output_dir
+    else:
+        # Never clobber a previous pass: bump to _pieces_2, _pieces_3, ...
+        base = args.video.parent / f"{args.video.stem}_pieces"
+        out_dir, n = base, 2
+        while out_dir.exists():
+            out_dir = base.with_name(f"{base.name}_{n}")
+            n += 1
     out_dir.mkdir(parents=True, exist_ok=True)
 
     duration, bitrate = probe_video(ffprobe, args.video)

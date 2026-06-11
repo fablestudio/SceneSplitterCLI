@@ -49,14 +49,17 @@ python3 scene_split.py input.mp4
 ```
 
 Pieces are written to `input_pieces/` next to the source file, named
-`input_001.mp4`, `input_002.mp4`, ...
+`input_001.mp4`, `input_002.mp4`, ... Re-running on the same video never
+overwrites a previous pass: if the folder already exists, the next run
+writes to `input_pieces_2/`, then `input_pieces_3/`, and so on. (An explicit
+`-o DIR` always writes to exactly that directory, overwriting its contents.)
 
 ### Options
 
 | Option | Default | Description |
 |---|---|---|
 | `-l`, `--length SECONDS` | `60` | Target piece length. Each piece ends at the first scene cut at or after this. |
-| `-o`, `--output-dir DIR` | `<name>_pieces/` | Where to write the pieces. |
+| `-o`, `--output-dir DIR` | `<name>_pieces/` (auto-incremented) | Where to write the pieces. Explicit `DIR` overwrites; the default never does. |
 | `-t`, `--threshold N` | `27` | Scene detection sensitivity; lower detects more cuts. |
 | `--copy` | off | Lossless stream copy instead of re-encoding (faster, bit-identical, but cuts snap to keyframes). |
 
