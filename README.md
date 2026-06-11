@@ -25,7 +25,7 @@ Pure Python + ffmpeg: runs unchanged on macOS, Windows, and Linux.
 
 ```sh
 brew install python ffmpeg
-git clone <this-repo>
+git clone https://github.com/fablestudio/SceneSplitterCLI
 cd SceneSplitterMac
 pip3 install -r requirements.txt
 ```
@@ -37,7 +37,7 @@ ffmpeg from [gyan.dev builds](https://www.gyan.dev/ffmpeg/builds/) (add it to
 PATH), then:
 
 ```sh
-git clone <this-repo>
+git clone https://github.com/fablestudio/SceneSplitterCLI
 cd SceneSplitterMac
 pip install -r requirements.txt
 ```
