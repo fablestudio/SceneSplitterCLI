@@ -49,10 +49,13 @@ Now, type brew help to see if it works. If it does, you are all set!
 #### Step 2: Install Homebrew (If Step 1 didn't work) ####
 If the command still fails, Homebrew is likely not installed on your system.
 Open your Terminal and run the official installation command:
-```/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"```
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
 Follow the on-screen instructions and type your Mac user password when prompted.
 Once the installation finishes, the installer will print out "Next steps." 
 Copy and run those two specific echo commands provided by the installer in your Terminal to finalize your PATH.
+
 
 ### Windows
 
