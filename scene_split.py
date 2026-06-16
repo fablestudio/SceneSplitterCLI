@@ -25,6 +25,16 @@ from scenedetect import ContentDetector, detect
 MP4_AUDIO_CODECS = {"aac", "mp3", "ac3", "eac3", "alac", "opus"}
 
 
+def timecode_seconds(tc):
+    """Return seconds for a FrameTimecode across scenedetect versions.
+
+    Newer releases (0.7+) expose a ``.seconds`` property; older ones only
+    have ``.get_seconds()`` (which newer releases deprecate). Prefer the
+    property when present so we don't trigger the deprecation warning.
+    """
+    return tc.seconds if hasattr(tc, "seconds") else tc.get_seconds()
+
+
 def find_tool(name):
     path = shutil.which(name)
     if not path:
@@ -213,7 +223,7 @@ def main():
     )
     print(f"Found {len(scene_list)} scenes in {duration:.1f}s of video.")
 
-    boundaries = sorted(scene[1].seconds for scene in scene_list)
+    boundaries = sorted(timecode_seconds(scene[1]) for scene in scene_list)
     if args.copy:
         # Lossless cuts can only land on keyframes; snap each scene cut to
         # the first keyframe at or after it so the plan matches the output.
