@@ -3,9 +3,10 @@
 
 Each output piece runs until the first scene cut at or after the target
 length (default 60s). By default pieces are re-encoded for frame-accurate
-cuts exactly on the scene boundaries, matching the source resolution, frame
-rate, and bitrate (audio is stream-copied). Use --copy for lossless stream
-copy instead, which snaps cuts to keyframes.
+cuts exactly on the scene boundaries, to H.264 MP4 at 8 Mbps, keeping the
+source resolution and frame rate (audio is stream-copied). Use --match-source
+to re-encode at the source's own bitrate instead, or --copy for lossless
+stream copy (which snaps cuts to keyframes and keeps the source container).
 
 Requires: Python 3.8+, scenedetect, and ffmpeg/ffprobe on PATH.
 Works on macOS, Windows, and Linux.
@@ -20,6 +21,9 @@ from pathlib import Path
 
 from scenedetect import ContentDetector, detect
 
+# Audio codecs MP4 can hold; anything else is re-encoded to AAC for MP4 output.
+MP4_AUDIO_CODECS = {"aac", "mp3", "ac3", "eac3", "alac", "opus"}
+
 
 def find_tool(name):
     path = shutil.which(name)
@@ -32,11 +36,12 @@ def find_tool(name):
 
 
 def probe_video(ffprobe, video_path):
-    """Return (duration_seconds, video_bitrate_bps_or_None) for the input."""
+    """Return (duration_s, video_bitrate_bps_or_None, audio_codec_or_None)."""
     result = subprocess.run(
         [
             ffprobe, "-v", "error",
-            "-show_entries", "format=duration:stream=bit_rate,codec_type",
+            "-show_entries",
+            "format=duration:stream=bit_rate,codec_type,codec_name",
             "-of", "json", str(video_path),
         ],
         capture_output=True, text=True, check=True,
@@ -44,11 +49,14 @@ def probe_video(ffprobe, video_path):
     info = json.loads(result.stdout)
     duration = float(info["format"]["duration"])
     bitrate = None
+    audio_codec = None
     for stream in info.get("streams", []):
-        if stream.get("codec_type") == "video" and stream.get("bit_rate"):
+        ct = stream.get("codec_type")
+        if ct == "video" and bitrate is None and stream.get("bit_rate"):
             bitrate = int(stream["bit_rate"])
-            break
-    return duration, bitrate
+        elif ct == "audio" and audio_codec is None:
+            audio_codec = stream.get("codec_name")
+    return duration, bitrate, audio_codec
 
 
 def keyframe_times(ffprobe, video_path):
@@ -125,12 +133,12 @@ def split_stream_copy(ffmpeg, video_path, out_dir, segments, width):
     subprocess.run(cmd, check=True)
 
 
-def split_reencode(ffmpeg, video_path, out_path, start, end, bitrate):
+def split_reencode(ffmpeg, video_path, out_path, start, end, bitrate, audio_args):
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{start:.6f}", "-i", str(video_path),
         "-t", f"{end - start:.6f}", "-map", "0",
-        "-c:v", "libx264", "-preset", "medium", "-c:a", "copy",
+        "-c:v", "libx264", "-preset", "medium", *audio_args,
     ]
     if bitrate:
         cmd += ["-b:v", str(bitrate)]
@@ -141,7 +149,8 @@ def split_reencode(ffmpeg, video_path, out_path, start, end, bitrate):
 def main():
     parser = argparse.ArgumentParser(
         description="Split a video into ~N-second pieces at scene cuts, "
-        "preserving the source bitrate/resolution/frame rate."
+        "re-encoding to H.264 at 8 Mbps by default (or --match-source / "
+        "--copy to keep the source bitrate)."
     )
     parser.add_argument("video", type=Path, help="input video file (H.264)")
     parser.add_argument(
@@ -160,6 +169,17 @@ def main():
         help="scene detection sensitivity; lower finds more cuts (default: 27)",
     )
     parser.add_argument(
+        "-b", "--bitrate", default="8M", metavar="RATE",
+        help="target video bitrate when re-encoding, in ffmpeg syntax "
+        "(default: 8M; e.g. 5M, 8000k)",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--match-source", action="store_true",
+        help="re-encode at the source's own bitrate instead of --bitrate "
+        "(frame-accurate, keeps source bitrate/resolution/frame rate)",
+    )
+    mode.add_argument(
         "--copy", action="store_true",
         help="use lossless stream copy instead of re-encoding (faster, "
         "bit-identical to source, but cuts snap to keyframes instead of "
@@ -184,7 +204,7 @@ def main():
             n += 1
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    duration, bitrate = probe_video(ffprobe, args.video)
+    duration, bitrate, audio_codec = probe_video(ffprobe, args.video)
 
     print(f"Detecting scenes in {args.video.name} ...")
     scene_list = detect(
@@ -202,12 +222,40 @@ def main():
         )
 
     segments = plan_segments(boundaries, duration, args.length)
-    print(f"Splitting into {len(segments)} pieces "
-          f"({'lossless stream copy' if args.copy else 'frame-accurate re-encode'}):")
+
+    if args.copy:
+        mode_desc = "lossless stream copy"
+        target_bitrate = None
+    elif args.match_source:
+        if not bitrate:
+            sys.exit(
+                "error: could not read source bitrate for --match-source; "
+                "use --bitrate RATE instead."
+            )
+        target_bitrate = bitrate
+        mode_desc = (f"frame-accurate re-encode at source bitrate "
+                     f"(~{bitrate / 1_000_000:.1f} Mbps)")
+    else:
+        target_bitrate = args.bitrate
+        mode_desc = f"frame-accurate re-encode at {args.bitrate}"
+    print(f"Splitting into {len(segments)} pieces ({mode_desc}):")
+
+    # MP4 output can't hold every audio codec; copy when compatible, else AAC.
+    if not args.copy:
+        if audio_codec and audio_codec not in MP4_AUDIO_CODECS:
+            audio_args = ["-c:a", "aac", "-b:a", "192k"]
+            print(f"Note: '{audio_codec}' audio isn't MP4-compatible; "
+                  "re-encoding audio to AAC.")
+        else:
+            audio_args = ["-c:a", "copy"]
+
+    # Re-encoding always produces H.264 MP4; stream copy keeps the source
+    # container so it stays bit-identical.
+    out_suffix = args.video.suffix if args.copy else ".mp4"
 
     width = max(3, len(str(len(segments))))
     for i, (start, end) in enumerate(segments, 1):
-        print(f"  {args.video.stem}_{i:0{width}d}{args.video.suffix}  "
+        print(f"  {args.video.stem}_{i:0{width}d}{out_suffix}  "
               f"[{start:8.2f}s - {end:8.2f}s]  ({end - start:.1f}s)")
 
     if args.copy:
@@ -215,8 +263,9 @@ def main():
     else:
         for i, (start, end) in enumerate(segments, 1):
             out_path = (out_dir /
-                        f"{args.video.stem}_{i:0{width}d}{args.video.suffix}")
-            split_reencode(ffmpeg, args.video, out_path, start, end, bitrate)
+                        f"{args.video.stem}_{i:0{width}d}{out_suffix}")
+            split_reencode(ffmpeg, args.video, out_path, start, end,
+                           target_bitrate, audio_args)
 
     print(f"Done. {len(segments)} pieces written to {out_dir}")
 

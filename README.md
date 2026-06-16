@@ -7,8 +7,12 @@ ends at the **first scene cut at or after** the target length, so pieces are
 at least the target length and never cut mid-scene.
 
 Cuts are frame-accurate, landing exactly on the detected scene boundaries.
-Output pieces match the source resolution, frame rate, and bitrate; audio is
-stream-copied untouched.
+By default pieces are re-encoded to **H.264 MP4 at 8 Mbps** (regardless of the
+input container), keeping the source resolution and frame rate. Audio is
+stream-copied untouched, or transcoded to AAC only if the source audio isn't
+MP4-compatible. Use `--match-source` to re-encode at the source's
+own bitrate, or `--copy` for a fast lossless stream copy that keeps the
+source container.
 
 Pure Python + ffmpeg: runs unchanged on macOS, Windows, and Linux.
 
@@ -25,7 +29,7 @@ Pure Python + ffmpeg: runs unchanged on macOS, Windows, and Linux.
 
 ```sh
 brew install python ffmpeg
-git clone https://github.com/fablestudio/SceneSplitterCLI
+git clone <this-repo>
 cd SceneSplitterMac
 pip3 install -r requirements.txt
 ```
@@ -37,7 +41,7 @@ ffmpeg from [gyan.dev builds](https://www.gyan.dev/ffmpeg/builds/) (add it to
 PATH), then:
 
 ```sh
-git clone https://github.com/fablestudio/SceneSplitterCLI
+git clone <this-repo>
 cd SceneSplitterMac
 pip install -r requirements.txt
 ```
@@ -61,7 +65,11 @@ writes to `input_pieces_2/`, then `input_pieces_3/`, and so on. (An explicit
 | `-l`, `--length SECONDS` | `60` | Target piece length. Each piece ends at the first scene cut at or after this. |
 | `-o`, `--output-dir DIR` | `<name>_pieces/` (auto-incremented) | Where to write the pieces. Explicit `DIR` overwrites; the default never does. |
 | `-t`, `--threshold N` | `27` | Scene detection sensitivity; lower detects more cuts. |
+| `-b`, `--bitrate RATE` | `8M` | Target video bitrate when re-encoding (ffmpeg syntax, e.g. `5M`, `8000k`). |
+| `--match-source` | off | Re-encode at the source's own bitrate instead of `--bitrate` (still frame-accurate). |
 | `--copy` | off | Lossless stream copy instead of re-encoding (faster, bit-identical, but cuts snap to keyframes). |
+
+`--match-source` and `--copy` are mutually exclusive.
 
 ### Examples
 
@@ -71,6 +79,12 @@ python3 scene_split.py movie.mp4 --length 120
 
 # more sensitive scene detection, custom output folder
 python3 scene_split.py movie.mp4 -t 20 -o ./clips
+
+# re-encode at a custom bitrate
+python3 scene_split.py movie.mp4 --bitrate 5M
+
+# keep the source's original bitrate (frame-accurate)
+python3 scene_split.py movie.mp4 --match-source
 
 # fast lossless split (cuts on keyframes rather than exact frames)
 python3 scene_split.py movie.mp4 --copy
@@ -85,8 +99,11 @@ python3 scene_split.py movie.mp4 --copy
    end of the video. If that leftover final piece would be shorter than half
    the target length, it is appended to the previous piece instead of
    standing alone — no piece is ever shorter than half the target.
-4. **Split** — each piece is encoded with libx264 at the source bitrate,
-   keeping the source resolution and frame rate; audio is stream-copied.
+4. **Split** — each piece is encoded with libx264 to an `.mp4` at the target
+   bitrate (8 Mbps by default, or the source bitrate with `--match-source`),
+   keeping the source resolution and frame rate; audio is stream-copied (or
+   transcoded to AAC if the source audio isn't MP4-compatible).
+   (`--copy` instead keeps the source container and is bit-identical.)
 
 ## Notes
 
