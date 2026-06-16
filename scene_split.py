@@ -99,6 +99,44 @@ def snap_to_keyframes(boundaries, keyframes, duration):
     return snapped
 
 
+def detect_scene_boundaries(video, threshold, duration, target_len, allow_prompt):
+    """Detect scene-cut times, retrying at a lower threshold if asked.
+
+    If the first scene is longer than the target length — i.e. no scene cut
+    was found within the first ``target_len`` seconds, usually because the
+    threshold is too high — offer to re-run the whole detection with the
+    threshold reduced by 5, down to 0. Returns sorted scene-end times (s).
+    """
+    while True:
+        print(f"Detecting scenes in {video.name} (threshold {threshold:g}) ...")
+        scene_list = detect(
+            str(video), ContentDetector(threshold=threshold),
+            show_progress=True,
+        )
+        boundaries = sorted(timecode_seconds(s[1]) for s in scene_list)
+        print(f"Found {len(scene_list)} scenes in {duration:.1f}s of video.")
+
+        first_scene_len = boundaries[0] if boundaries else duration
+        if first_scene_len <= target_len or threshold <= 0:
+            return boundaries
+
+        new_threshold = max(0.0, threshold - 5)
+        print(f"  First scene is {first_scene_len:.1f}s long - no scene cut "
+              f"within the {target_len:g}s target, so detection looks too "
+              f"coarse at threshold {threshold:g}.")
+        if not allow_prompt:
+            print("  Non-interactive session; keeping this result.")
+            return boundaries
+        try:
+            ans = input(f"  Retry from the start at threshold "
+                        f"{new_threshold:g} (discards this pass)? [y/N] ")
+        except EOFError:
+            return boundaries
+        if ans.strip().lower() not in ("y", "yes"):
+            return boundaries
+        threshold = new_threshold
+
+
 def plan_segments(boundaries, duration, target_len):
     """Build (start, end) pairs in seconds.
 
@@ -203,27 +241,12 @@ def main():
     ffmpeg = find_tool("ffmpeg")
     ffprobe = find_tool("ffprobe")
 
-    if args.output_dir:
-        out_dir = args.output_dir
-    else:
-        # Never clobber a previous pass: bump to _pieces_2, _pieces_3, ...
-        base = args.video.parent / f"{args.video.stem}_pieces"
-        out_dir, n = base, 2
-        while out_dir.exists():
-            out_dir = base.with_name(f"{base.name}_{n}")
-            n += 1
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     duration, bitrate, audio_codec = probe_video(ffprobe, args.video)
 
-    print(f"Detecting scenes in {args.video.name} ...")
-    scene_list = detect(
-        str(args.video), ContentDetector(threshold=args.threshold),
-        show_progress=True,
+    boundaries = detect_scene_boundaries(
+        args.video, args.threshold, duration, args.length,
+        allow_prompt=sys.stdin.isatty(),
     )
-    print(f"Found {len(scene_list)} scenes in {duration:.1f}s of video.")
-
-    boundaries = sorted(timecode_seconds(scene[1]) for scene in scene_list)
     if args.copy:
         # Lossless cuts can only land on keyframes; snap each scene cut to
         # the first keyframe at or after it so the plan matches the output.
@@ -267,6 +290,19 @@ def main():
     for i, (start, end) in enumerate(segments, 1):
         print(f"  {args.video.stem}_{i:0{width}d}{out_suffix}  "
               f"[{start:8.2f}s - {end:8.2f}s]  ({end - start:.1f}s)")
+
+    # Create the output folder only now, once we're committed to writing, so
+    # a detection pass the user discarded never leaves files behind.
+    if args.output_dir:
+        out_dir = args.output_dir
+    else:
+        # Never clobber a previous pass: bump to _pieces_2, _pieces_3, ...
+        base = args.video.parent / f"{args.video.stem}_pieces"
+        out_dir, n = base, 2
+        while out_dir.exists():
+            out_dir = base.with_name(f"{base.name}_{n}")
+            n += 1
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.copy:
         split_stream_copy(ffmpeg, args.video, out_dir, segments, width)

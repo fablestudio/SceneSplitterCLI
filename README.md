@@ -117,6 +117,11 @@ python3 scene_split.py movie.mp4 --copy
 
 1. **Probe** — ffprobe reads the source duration and video bitrate.
 2. **Detect** — PySceneDetect's `ContentDetector` finds every scene change.
+   If the first scene turns out longer than the target length (i.e. no cut was
+   found within the first `length` seconds, usually meaning the threshold is
+   too high), you're offered the chance to re-run detection from scratch with
+   the threshold lowered by 5, repeatedly down to 0. Nothing is written until
+   you accept a result, so a discarded pass never leaves files behind.
 3. **Plan** — starting from 0, each piece ends at the first scene boundary at
    or after `start + length`. If no boundary remains, the piece runs to the
    end of the video. If that leftover final piece would be shorter than half
