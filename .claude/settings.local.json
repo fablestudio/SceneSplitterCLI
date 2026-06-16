@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(python --version)",
-      "PowerShell(ffmpeg -version)",
-      "PowerShell(ffprobe -version)"
-    ]
-  }
-}
