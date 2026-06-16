@@ -37,9 +37,13 @@ pip3 install -r requirements.txt
 if you get a Brew Not Found Error
 ### Step 1: Add Homebrew to your PATH ###
 If you already installed Homebrew, your shell just needs to be told where to find it. This is a very common issue on newer Macs with Apple Silicon (M1, M2, or M3 chips).Run the following commands in your Terminal one by one:Add the Homebrew path to your configuration:
+
 ```echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile```
+
 Apply the changes to your current session:
+
 ```eval "$(/opt/homebrew/bin/brew shellenv)"```
+
 Now, type brew help to see if it works. If it does, you are all set!
 
 ### Step 2: Install Homebrew (If Step 1 didn't work) ###
