@@ -34,7 +34,7 @@ cd SceneSplitterMac
 pip3 install -r requirements.txt
 ```
 
-if you get a Brew Not Found Error
+*_ if you get a Brew Not Found Error _*
 #### Step 1: Add Homebrew to your PATH ####
 If you already installed Homebrew, your shell just needs to be told where to find it. This is a very common issue on newer Macs with Apple Silicon (M1, M2, or M3 chips).Run the following commands in your Terminal one by one:Add the Homebrew path to your configuration:
 ```sh
