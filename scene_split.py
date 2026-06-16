@@ -102,11 +102,13 @@ def snap_to_keyframes(boundaries, keyframes, duration):
 def detect_scene_boundaries(video, threshold, duration, target_len, allow_prompt):
     """Detect scene-cut times, retrying at a lower threshold if asked.
 
-    If the first scene is longer than the target length — i.e. no scene cut
-    was found within the first ``target_len`` seconds, usually because the
-    threshold is too high — offer to re-run the whole detection with the
-    threshold reduced by 5, down to 0. Returns sorted scene-end times (s).
+    If any scene is longer than 1.5x the target length - meaning a piece would
+    be forced well past the requested length because no cut was found inside
+    it, usually because the threshold is too high - offer to re-run the whole
+    detection with the threshold reduced by 5, down to 0. Returns sorted
+    scene-end times (seconds).
     """
+    max_scene = target_len * 1.5
     while True:
         print(f"Detecting scenes in {video.name} (threshold {threshold:g}) ...")
         scene_list = detect(
@@ -116,14 +118,18 @@ def detect_scene_boundaries(video, threshold, duration, target_len, allow_prompt
         boundaries = sorted(timecode_seconds(s[1]) for s in scene_list)
         print(f"Found {len(scene_list)} scenes in {duration:.1f}s of video.")
 
-        first_scene_len = boundaries[0] if boundaries else duration
-        if first_scene_len <= target_len or threshold <= 0:
+        # Longest gap between consecutive cuts (0 and end-of-video included).
+        prev = longest = 0.0
+        for b in boundaries + [duration]:
+            longest = max(longest, b - prev)
+            prev = b
+        if longest <= max_scene or threshold <= 0:
             return boundaries
 
         new_threshold = max(0.0, threshold - 5)
-        print(f"  First scene is {first_scene_len:.1f}s long - no scene cut "
-              f"within the {target_len:g}s target, so detection looks too "
-              f"coarse at threshold {threshold:g}.")
+        print(f"  Longest scene is {longest:.1f}s - over 1.5x the "
+              f"{target_len:g}s target ({max_scene:.1f}s), so detection looks "
+              f"too coarse at threshold {threshold:g}.")
         if not allow_prompt:
             print("  Non-interactive session; keeping this result.")
             return boundaries
