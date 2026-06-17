@@ -187,16 +187,32 @@ def split_stream_copy(ffmpeg, video_path, out_dir, segments, width):
     subprocess.run(cmd, check=True)
 
 
-def split_reencode(ffmpeg, video_path, out_path, start, end, bitrate, audio_args):
+def split_reencode(ffmpeg, video_path, out_dir, segments, width, bitrate,
+                   audio_args):
+    """Re-encode and split in a single decode pass.
+
+    A keyframe is forced exactly at each cut time and the segment muxer splits
+    there, so cuts are frame-accurate. Because the input is decoded straight
+    through (never seeked into mid-stream), this avoids the benign but noisy
+    ``mmco: unref short failure`` decoder warnings that per-segment seeking
+    produces, and only decodes the source once.
+    """
+    pattern = out_dir / f"{video_path.stem}_%0{width}d.mp4"
+    cut_times = [f"{end:.6f}" for _, end in segments[:-1]]
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-        "-ss", f"{start:.6f}", "-i", str(video_path),
-        "-t", f"{end - start:.6f}", "-map", "0",
+        "-i", str(video_path), "-map", "0",
         "-c:v", "libx264", "-preset", "medium", *audio_args,
     ]
     if bitrate:
         cmd += ["-b:v", str(bitrate)]
-    cmd.append(str(out_path))
+    if cut_times:
+        cmd += ["-force_key_frames", ",".join(cut_times)]
+    cmd += ["-f", "segment", "-reset_timestamps", "1",
+            "-segment_start_number", "1"]
+    if cut_times:
+        cmd += ["-segment_times", ",".join(cut_times)]
+    cmd.append(str(pattern))
     subprocess.run(cmd, check=True)
 
 
@@ -313,11 +329,8 @@ def main():
     if args.copy:
         split_stream_copy(ffmpeg, args.video, out_dir, segments, width)
     else:
-        for i, (start, end) in enumerate(segments, 1):
-            out_path = (out_dir /
-                        f"{args.video.stem}_{i:0{width}d}{out_suffix}")
-            split_reencode(ffmpeg, args.video, out_path, start, end,
-                           target_bitrate, audio_args)
+        split_reencode(ffmpeg, args.video, out_dir, segments, width,
+                       target_bitrate, audio_args)
 
     print(f"Done. {len(segments)} pieces written to {out_dir}")
 

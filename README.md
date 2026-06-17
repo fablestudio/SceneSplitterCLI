@@ -138,8 +138,10 @@ python3 scene_split.py movie.mp4 --copy
 
 - **Default mode re-encodes the video.** That is what makes frame-accurate
   cuts possible: H.264 frames depend on earlier frames, so a copied stream
-  can only begin at a keyframe. Re-encoding decodes and re-compresses each
-  piece so it can start on the exact scene-cut frame.
+  can only begin at a keyframe. Re-encoding forces a keyframe exactly at each
+  cut, in a single decode pass, so every piece starts on the exact scene-cut
+  frame. (Stream-copied audio can only split on its own frame boundaries, so a
+  piece's audio may run a few milliseconds longer than its video — harmless.)
 - **`--copy` mode** is lossless and much faster, but each cut is snapped to
   the first keyframe at or after the scene cut (the printed plan shows the
   exact snapped times). Scene changes usually coincide with keyframes, so the
