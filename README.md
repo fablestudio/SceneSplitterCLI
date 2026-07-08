@@ -91,6 +91,8 @@ writes to `input_pieces_2/`, then `input_pieces_3/`, and so on. (An explicit
 | `-b`, `--bitrate RATE` | `8M` | Target video bitrate when re-encoding (ffmpeg syntax, e.g. `5M`, `8000k`). |
 | `--match-source` | off | Re-encode at the source's own bitrate instead of `--bitrate` (still frame-accurate). |
 | `--copy` | off | Lossless stream copy instead of re-encoding (faster, bit-identical, but cuts snap to keyframes). |
+| `--summarize` | off | Also generate a title + synopsis for each piece via the Fable API, overlapped with extraction. Needs `FABLE_API_KEY`. See [Summaries](#summaries-titles--synopses). |
+| `--api-concurrency N` | `4` | How many pieces to summarize in parallel. |
 
 `--match-source` and `--copy` are mutually exclusive.
 
@@ -111,7 +113,40 @@ python3 scene_split.py movie.mp4 --match-source
 
 # fast lossless split (cuts on keyframes rather than exact frames)
 python3 scene_split.py movie.mp4 --copy
+
+# split AND generate a title + synopsis for each piece
+export FABLE_API_KEY="your-token"
+python3 scene_split.py movie.mp4 --summarize
 ```
+
+## Summaries (titles & synopses)
+
+With `--summarize`, each piece is sent to the Fable (ComfyDeploy) API to get a
+title and synopsis. Uploads run **in parallel with the extraction** — a piece
+is uploaded the moment ffmpeg finishes writing it, so summarization overlaps
+the rest of the split.
+
+Configuration is read from the environment:
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `FABLE_API_KEY` | yes | — | Bearer token for the API. |
+| `FABLE_API_URL` | no | `https://api.fablecd.com` | API base URL. |
+| `FABLE_DEPLOYMENT_ID` | no | the summariser deployment | Deployment to run. |
+
+Outputs, written into the pieces folder alongside the videos:
+
+- **`<piece>.json`** for each piece, e.g. `movie_001.json`:
+  ```json
+  { "title": "…", "summary": "…" }
+  ```
+- **`<video>_summary.txt`** — one copy/paste-friendly block per piece with no
+  headers: the filename, a blank line, the title, a blank line, the synopsis,
+  then a double blank line before the next. Designed to paste straight into a
+  web form.
+
+If a piece's API call fails, it's recorded in that piece's JSON with an
+`error` field and left blank in the text file; the rest still complete.
 
 ## How it works
 

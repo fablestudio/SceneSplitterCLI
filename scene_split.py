@@ -166,8 +166,14 @@ def plan_segments(boundaries, duration, target_len):
     return segments
 
 
-def split_stream_copy(ffmpeg, video_path, out_dir, segments, width):
-    """Split losslessly in one pass with the segment muxer.
+def segment_names(video_path, segments, width, suffix):
+    """The output filenames the segment muxer will write, in order."""
+    return [f"{video_path.stem}_{i:0{width}d}{suffix}"
+            for i in range(1, len(segments) + 1)]
+
+
+def stream_copy_cmd(ffmpeg, video_path, out_dir, segments, width):
+    """ffmpeg command to split losslessly in one pass with the segment muxer.
 
     Each cut lands on the first keyframe at or after the requested time, so
     pieces never overlap and concatenate back to the exact source.
@@ -184,12 +190,12 @@ def split_stream_copy(ffmpeg, video_path, out_dir, segments, width):
     if cut_times:
         cmd += ["-segment_times", ",".join(cut_times)]
     cmd.append(str(pattern))
-    subprocess.run(cmd, check=True)
+    return cmd
 
 
-def split_reencode(ffmpeg, video_path, out_dir, segments, width, bitrate,
-                   audio_args):
-    """Re-encode and split in a single decode pass.
+def reencode_cmd(ffmpeg, video_path, out_dir, segments, width, bitrate,
+                 audio_args):
+    """ffmpeg command to re-encode and split in a single decode pass.
 
     A keyframe is forced exactly at each cut time and the segment muxer splits
     there, so cuts are frame-accurate. Because the input is decoded straight
@@ -198,7 +204,11 @@ def split_reencode(ffmpeg, video_path, out_dir, segments, width, bitrate,
     produces, and only decodes the source once.
     """
     pattern = out_dir / f"{video_path.stem}_%0{width}d.mp4"
-    cut_times = [f"{end:.6f}" for _, end in segments[:-1]]
+    # Force a keyframe exactly at each cut (frame-accurate), but aim the split
+    # 1ms earlier so float rounding can't leave the keyframe just below the
+    # target time and make the muxer skip the cut.
+    key_times = [f"{end:.6f}" for _, end in segments[:-1]]
+    seg_times = [f"{max(0.0, end - 0.001):.6f}" for _, end in segments[:-1]]
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(video_path), "-map", "0",
@@ -206,14 +216,14 @@ def split_reencode(ffmpeg, video_path, out_dir, segments, width, bitrate,
     ]
     if bitrate:
         cmd += ["-b:v", str(bitrate)]
-    if cut_times:
-        cmd += ["-force_key_frames", ",".join(cut_times)]
+    if key_times:
+        cmd += ["-force_key_frames", ",".join(key_times)]
     cmd += ["-f", "segment", "-reset_timestamps", "1",
             "-segment_start_number", "1"]
-    if cut_times:
-        cmd += ["-segment_times", ",".join(cut_times)]
+    if seg_times:
+        cmd += ["-segment_times", ",".join(seg_times)]
     cmd.append(str(pattern))
-    subprocess.run(cmd, check=True)
+    return cmd
 
 
 def main():
@@ -255,6 +265,16 @@ def main():
         "bit-identical to source, but cuts snap to keyframes instead of "
         "exact scene-cut frames)",
     )
+    parser.add_argument(
+        "--summarize", action="store_true",
+        help="also generate a title and summary for each piece via the Fable "
+        "API (overlapped with extraction), writing <piece>.json plus a "
+        "combined <video>_summary.txt. Needs FABLE_API_KEY in the environment.",
+    )
+    parser.add_argument(
+        "--api-concurrency", type=int, default=4, metavar="N",
+        help="how many pieces to summarize in parallel (default: 4)",
+    )
     args = parser.parse_args()
 
     if not args.video.is_file():
@@ -262,6 +282,21 @@ def main():
 
     ffmpeg = find_tool("ffmpeg")
     ffprobe = find_tool("ffprobe")
+
+    # Set up the summariser up front so a missing key/dependency fails fast,
+    # before the (slow) scene detection and extraction.
+    summary_client = None
+    if args.summarize:
+        try:
+            import summarize
+        except ImportError:
+            sys.exit("error: --summarize needs the 'requests' package "
+                     "(pip install requests).")
+        try:
+            summary_client = summarize.FableClient.from_env()
+        except ValueError:
+            sys.exit("error: --summarize needs FABLE_API_KEY set in the "
+                     "environment.")
 
     duration, bitrate, audio_codec = probe_video(ffprobe, args.video)
 
@@ -327,12 +362,33 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.copy:
-        split_stream_copy(ffmpeg, args.video, out_dir, segments, width)
+        cmd = stream_copy_cmd(ffmpeg, args.video, out_dir, segments, width)
     else:
-        split_reencode(ffmpeg, args.video, out_dir, segments, width,
-                       target_bitrate, audio_args)
+        cmd = reencode_cmd(ffmpeg, args.video, out_dir, segments, width,
+                           target_bitrate, audio_args)
 
+    if not args.summarize:
+        subprocess.run(cmd, check=True)
+        print(f"Done. {len(segments)} pieces written to {out_dir}")
+        return
+
+    names = segment_names(args.video, segments, width, out_suffix)
+    print(f"Extracting and summarizing (up to {args.api_concurrency} in "
+          "parallel) ...")
+    results = summarize.run_split_with_summaries(
+        cmd, out_dir, names, summary_client,
+        concurrency=args.api_concurrency,
+        stderr_path=out_dir / ".ffmpeg-split.log",
+        on_event=print,
+    )
+    text_path = out_dir / f"{args.video.stem}_summary.txt"
+    summarize.write_summary_text(text_path, names, results)
+    ok = sum(1 for r in results.values() if r.get("title") or r.get("summary"))
+    failed = [n for n in names if results.get(n, {}).get("error")]
     print(f"Done. {len(segments)} pieces written to {out_dir}")
+    print(f"Summaries: {ok}/{len(names)} succeeded"
+          + (f", {len(failed)} failed" if failed else "")
+          + f". Copy/paste file: {text_path}")
 
 
 if __name__ == "__main__":
