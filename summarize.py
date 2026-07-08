@@ -106,11 +106,25 @@ class FableClient:
         return extract_title_summary(run)
 
 
-def _first_str(values):
-    for v in values:
-        if isinstance(v, str) and v.strip():
-            return v
-    return None
+def _iter_output_values(run):
+    for output in run.get("outputs", []):
+        data = output.get("data") or {}
+        for key, values in data.items():
+            if isinstance(values, list):
+                for value in values:
+                    yield key, value
+
+
+def _result_file_url(run):
+    """URL of the run's result file, preferring a ``.json`` output."""
+    fallback = None
+    for _key, value in _iter_output_values(run):
+        if isinstance(value, dict) and value.get("url"):
+            url = value["url"]
+            if url.lower().split("?", 1)[0].endswith(".json"):
+                return url
+            fallback = fallback or url
+    return fallback
 
 
 def _maybe_json(text):
@@ -121,33 +135,46 @@ def _maybe_json(text):
     return obj if isinstance(obj, dict) else None
 
 
-def extract_title_summary(run):
-    """Pull title/summary out of a completed run's outputs.
+def _pick(blob):
+    return {
+        "title": blob.get("title") or "",
+        "summary": blob.get("summary") or blob.get("synopsis") or "",
+    }
 
-    Handles both a single output whose text is a ``{"title","summary"}`` JSON
-    blob and separate outputs keyed by name. Returns a dict with whatever was
-    found (missing fields are empty strings).
+
+def extract_title_summary(run, fetch_timeout=60):
+    """Pull ``{"title","summary"}`` out of a completed run.
+
+    The deployment writes the analysis to a JSON file and the run output just
+    references its (public) URL, so download that file and read the fields.
+    Falls back to an inline JSON-string or name-keyed output if the shape ever
+    changes. Missing fields come back as empty strings.
     """
+    url = _result_file_url(run)
+    if url:
+        r = requests.get(url, timeout=fetch_timeout)
+        r.raise_for_status()
+        blob = r.json()
+        if isinstance(blob, dict):
+            return _pick(blob)
+
+    # Fallbacks for inline shapes.
     title = summary = None
-    for output in run.get("outputs", []):
-        data = output.get("data") or {}
-        for key, values in data.items():
-            if not isinstance(values, list):
-                continue
-            text = _first_str(values)
-            if text is None:
-                continue
-            blob = _maybe_json(text)
-            if blob is not None:
-                title = title or blob.get("title")
-                summary = summary or blob.get("summary") or blob.get("synopsis")
-                continue
-            kl = key.lower()
-            if "title" in kl and title is None:
-                title = text
-            elif ("summary" in kl or "synopsis" in kl or "description" in kl) \
-                    and summary is None:
-                summary = text
+    for key, value in _iter_output_values(run):
+        if not isinstance(value, str) or not value.strip():
+            continue
+        blob = _maybe_json(value)
+        if blob is not None:
+            got = _pick(blob)
+            title = title or got["title"]
+            summary = summary or got["summary"]
+            continue
+        kl = key.lower()
+        if "title" in kl and title is None:
+            title = value
+        elif ("summary" in kl or "synopsis" in kl or "description" in kl) \
+                and summary is None:
+            summary = value
     return {"title": title or "", "summary": summary or ""}
 
 

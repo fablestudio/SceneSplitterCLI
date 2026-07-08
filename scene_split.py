@@ -178,18 +178,22 @@ def stream_copy_cmd(ffmpeg, video_path, out_dir, segments, width):
     Each cut lands on the first keyframe at or after the requested time, so
     pieces never overlap and concatenate back to the exact source.
     """
-    pattern = out_dir / f"{video_path.stem}_%0{width}d{video_path.suffix}"
+    names = segment_names(video_path, segments, width, video_path.suffix)
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(video_path), "-map", "0", "-c", "copy",
-        "-f", "segment", "-reset_timestamps", "1",
-        "-segment_start_number", "1",
     ]
+    if len(segments) <= 1:
+        # No cuts: copy the whole thing to a single file (the segment muxer
+        # would otherwise apply its default 2s split).
+        cmd.append(str(out_dir / names[0]))
+        return cmd
+    cmd += ["-f", "segment", "-reset_timestamps", "1",
+            "-segment_start_number", "1"]
     # 1ms early so float rounding can't push a cut past its keyframe
     cut_times = [f"{max(0.0, end - 0.001):.6f}" for _, end in segments[:-1]]
-    if cut_times:
-        cmd += ["-segment_times", ",".join(cut_times)]
-    cmd.append(str(pattern))
+    cmd += ["-segment_times", ",".join(cut_times),
+            str(out_dir / f"{video_path.stem}_%0{width}d{video_path.suffix}")]
     return cmd
 
 
@@ -203,12 +207,7 @@ def reencode_cmd(ffmpeg, video_path, out_dir, segments, width, bitrate,
     ``mmco: unref short failure`` decoder warnings that per-segment seeking
     produces, and only decodes the source once.
     """
-    pattern = out_dir / f"{video_path.stem}_%0{width}d.mp4"
-    # Force a keyframe exactly at each cut (frame-accurate), but aim the split
-    # 1ms earlier so float rounding can't leave the keyframe just below the
-    # target time and make the muxer skip the cut.
-    key_times = [f"{end:.6f}" for _, end in segments[:-1]]
-    seg_times = [f"{max(0.0, end - 0.001):.6f}" for _, end in segments[:-1]]
+    names = segment_names(video_path, segments, width, ".mp4")
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(video_path), "-map", "0",
@@ -216,13 +215,21 @@ def reencode_cmd(ffmpeg, video_path, out_dir, segments, width, bitrate,
     ]
     if bitrate:
         cmd += ["-b:v", str(bitrate)]
-    if key_times:
-        cmd += ["-force_key_frames", ",".join(key_times)]
-    cmd += ["-f", "segment", "-reset_timestamps", "1",
-            "-segment_start_number", "1"]
-    if seg_times:
-        cmd += ["-segment_times", ",".join(seg_times)]
-    cmd.append(str(pattern))
+    if len(segments) <= 1:
+        # No cuts: a single piece is a straight re-encode to one file (the
+        # segment muxer would otherwise apply its default 2s split).
+        cmd.append(str(out_dir / names[0]))
+        return cmd
+    # Force a keyframe exactly at each cut (frame-accurate), but aim the split
+    # 1ms earlier so float rounding can't leave the keyframe just below the
+    # target time and make the muxer skip the cut.
+    key_times = [f"{end:.6f}" for _, end in segments[:-1]]
+    seg_times = [f"{max(0.0, end - 0.001):.6f}" for _, end in segments[:-1]]
+    cmd += ["-force_key_frames", ",".join(key_times),
+            "-f", "segment", "-reset_timestamps", "1",
+            "-segment_start_number", "1",
+            "-segment_times", ",".join(seg_times),
+            str(out_dir / f"{video_path.stem}_%0{width}d.mp4")]
     return cmd
 
 
