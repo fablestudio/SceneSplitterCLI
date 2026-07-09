@@ -91,7 +91,7 @@ writes to `input_pieces_2/`, then `input_pieces_3/`, and so on. (An explicit
 | `-b`, `--bitrate RATE` | `8M` | Target video bitrate when re-encoding (ffmpeg syntax, e.g. `5M`, `8000k`). |
 | `--match-source` | off | Re-encode at the source's own bitrate instead of `--bitrate` (still frame-accurate). |
 | `--copy` | off | Lossless stream copy instead of re-encoding (faster, bit-identical, but cuts snap to keyframes). |
-| `--summarize` | off | Also generate a title + synopsis for each piece via the Fable API, overlapped with extraction. Needs `FABLE_API_KEY`. See [Summaries](#summaries-titles--synopses). |
+| `--no-summarize` | off | Skip title/synopsis generation. It's **on by default** (needs `FABLE_API_KEY`; skipped automatically if unset). See [Summaries](#summaries-titles--synopses). |
 | `--api-concurrency N` | `4` | How many pieces to summarize in parallel. |
 
 `--match-source` and `--copy` are mutually exclusive.
@@ -114,17 +114,21 @@ python3 scene_split.py movie.mp4 --match-source
 # fast lossless split (cuts on keyframes rather than exact frames)
 python3 scene_split.py movie.mp4 --copy
 
-# split AND generate a title + synopsis for each piece
+# split with summaries (the default) — just set the key
 export FABLE_API_KEY="your-token"
-python3 scene_split.py movie.mp4 --summarize
+python3 scene_split.py movie.mp4
+
+# split only, no API calls
+python3 scene_split.py movie.mp4 --no-summarize
 ```
 
 ## Summaries (titles & synopses)
 
-With `--summarize`, each piece is sent to the Fable (ComfyDeploy) API to get a
-title and synopsis. Uploads run **in parallel with the extraction** — a piece
-is uploaded the moment ffmpeg finishes writing it, so summarization overlaps
-the rest of the split.
+By default each piece is sent to the Fable (ComfyDeploy) API to get a title
+and synopsis (pass `--no-summarize` to skip, or leave `FABLE_API_KEY` unset and
+it's skipped automatically). Uploads run **in parallel with the extraction** —
+a piece is uploaded the moment ffmpeg finishes writing it, so summarization
+overlaps the rest of the split.
 
 Configuration is read from the environment:
 

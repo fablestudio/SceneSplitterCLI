@@ -273,10 +273,11 @@ def main():
         "exact scene-cut frames)",
     )
     parser.add_argument(
-        "--summarize", action="store_true",
-        help="also generate a title and summary for each piece via the Fable "
-        "API (overlapped with extraction), writing <piece>.json plus a "
-        "combined <video>_summary.txt. Needs FABLE_API_KEY in the environment.",
+        "--no-summarize", dest="summarize", action="store_false",
+        help="skip title/summary generation. By default each piece is sent to "
+        "the Fable API (overlapped with extraction) to write <piece>.json plus "
+        "a combined <video>_summary.txt; that needs FABLE_API_KEY in the "
+        "environment (without it, summaries are skipped automatically).",
     )
     parser.add_argument(
         "--api-concurrency", type=int, default=4, metavar="N",
@@ -290,20 +291,22 @@ def main():
     ffmpeg = find_tool("ffmpeg")
     ffprobe = find_tool("ffprobe")
 
-    # Set up the summariser up front so a missing key/dependency fails fast,
-    # before the (slow) scene detection and extraction.
+    # Set up the summariser up front (before the slow detection/extraction).
+    # Summaries are on by default; if the key or dependency is missing, note
+    # it and carry on with a plain split rather than failing.
     summary_client = None
     if args.summarize:
         try:
             import summarize
-        except ImportError:
-            sys.exit("error: --summarize needs the 'requests' package "
-                     "(pip install requests).")
-        try:
             summary_client = summarize.FableClient.from_env()
+        except ImportError:
+            print("note: 'requests' is not installed; skipping summaries "
+                  "(pip install requests, or pass --no-summarize).")
+            args.summarize = False
         except ValueError:
-            sys.exit("error: --summarize needs FABLE_API_KEY set in the "
-                     "environment.")
+            print("note: FABLE_API_KEY is not set; skipping summaries "
+                  "(set it to enable, or pass --no-summarize to silence).")
+            args.summarize = False
 
     duration, bitrate, audio_codec = probe_video(ffprobe, args.video)
 
