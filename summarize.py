@@ -36,13 +36,16 @@ class SummaryError(RuntimeError):
 
 class FableClient:
     def __init__(self, api_key, api_url=None, deployment_id=None,
-                 poll_interval=10.0, run_timeout=1800.0):
+                 poll_interval=10.0, run_timeout=1800.0,
+                 attempts=3, retry_backoff=3.0):
         if not api_key:
             raise ValueError("api_key is required")
         self.base = (api_url or DEFAULT_API_URL).rstrip("/")
         self.deployment_id = deployment_id or DEFAULT_DEPLOYMENT_ID
         self.poll_interval = poll_interval
         self.run_timeout = run_timeout
+        self.attempts = max(1, attempts)
+        self.retry_backoff = retry_backoff
         self._auth = {"Authorization": f"Bearer {api_key}"}
 
     @classmethod
@@ -95,15 +98,36 @@ class FableClient:
                                    f"{self.run_timeout:.0f}s")
             time.sleep(self.poll_interval)
 
-    def summarize(self, path):
-        """Upload, run, and return {"title": ..., "summary": ...} for a file."""
+    def _summarize_once(self, path):
         url = self.upload(path)
         run_id = self.queue(url)
         run = self.poll(run_id)
         if run.get("status") not in _SUCCESS:
             raise SummaryError(f"run {run_id} ended with status "
                                f"{run.get('status')!r}")
-        return extract_title_summary(run)
+        result = extract_title_summary(run)
+        if not result.get("title") and not result.get("summary"):
+            raise SummaryError(f"run {run_id} returned no title or summary")
+        return result
+
+    def summarize(self, path, notify=None):
+        """Upload, run, and return {"title": ..., "summary": ...} for a file.
+
+        Retries the whole cycle up to ``self.attempts`` times (a failed or
+        timed-out run needs a fresh queue). An empty title *and* summary counts
+        as a failure. Raises the last error if every attempt fails.
+        """
+        last_exc = None
+        for attempt in range(1, self.attempts + 1):
+            try:
+                return self._summarize_once(path)
+            except Exception as exc:  # noqa: BLE001 - retry any failure
+                last_exc = exc
+                if notify:
+                    notify(f"attempt {attempt}/{self.attempts} failed: {exc}")
+                if attempt < self.attempts:
+                    time.sleep(self.retry_backoff * attempt)
+        raise last_exc
 
 
 def _iter_output_values(run):
@@ -226,12 +250,13 @@ def run_split_with_summaries(cmd, out_dir, segment_names, client, concurrency,
     def worker(name):
         path = out_dir / name
         try:
-            result = client.summarize(path)
+            result = client.summarize(
+                path, notify=lambda m: announce(f"  {name}: {m}"))
             write_summary_json(path, result)
             announce(f"  summarised {name}: {result.get('title') or '(no title)'}")
         except Exception as exc:  # noqa: BLE001 - report, don't abort the batch
             result = {"title": "", "summary": "", "error": str(exc)}
-            announce(f"  FAILED {name}: {exc}")
+            announce(f"  FAILED {name} after retries: {exc}")
         with lock:
             results[name] = result
 

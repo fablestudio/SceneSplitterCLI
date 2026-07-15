@@ -149,8 +149,10 @@ Outputs, written into the pieces folder alongside the videos:
   then a double blank line before the next. Designed to paste straight into a
   web form.
 
-If a piece's API call fails, it's recorded in that piece's JSON with an
-`error` field and left blank in the text file; the rest still complete.
+Each piece is retried up to **3 times** on failure — a network error, a run
+that times out or errors, or a run that comes back with no title/summary. If
+all three attempts fail, that piece is recorded in its JSON with an `error`
+field and left blank in the text file; the rest still complete.
 
 ## How it works
 
